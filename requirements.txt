@@ -10,5 +10,3 @@ langchain-google-genai
 google-generativeai
 python-dotenv
 pydantic
-
-smtplib-client
