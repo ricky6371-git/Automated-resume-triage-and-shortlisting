@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
 import json
-from utils import extract_text_from_pdf, extract_email, extract_name
+from .utils import extract_text_from_pdf, extract_email, extract_name
 from llm_agents import run_resume_workflow
 
 app = FastAPI(title="Automated Resume Triage and Shortlisting System",
@@ -63,4 +63,5 @@ async def process_resume(
         return {"error": f"Failed to process resume: {str(e)}"}
 
 if __name__ == "__main__":
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
