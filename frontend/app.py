@@ -2,10 +2,10 @@ import streamlit as st
 import requests
 import json
 
-fastapi_url = st.secrets.get(
-    "BACKEND_URL",
-    "http://localhost:8000/process_resume"
-)
+if "BACKEND_URL" in st.secrets:
+    fastapi_url = st.secrets["BACKEND_URL"]
+else:
+    fastapi_url = "http://localhost:8000/process_resume"
 
 
 st.set_page_config(page_title="Automated Resume Triage", layout="wide")
@@ -72,4 +72,5 @@ else:
                     except Exception as e:
 
                         st.error(f"Request failed: {e}")
+
 
