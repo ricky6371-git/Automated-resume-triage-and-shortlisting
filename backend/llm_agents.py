@@ -84,35 +84,75 @@ def decide_candidate(state):
     state["decision_result"] = {"decision": decision, "threshold": threshold, "score": score, "feedback": feedback, "reasoning": reasoning}
     return state
 
-def send_real_email(to_email, subject, message):
+import time
+import socket
+
+def send_real_email(to_email, subject, message, max_retries: int = 2) -> str:
     host = os.getenv("EMAIL_HOST", "smtp.gmail.com")
     port = int(os.getenv("EMAIL_PORT", "587"))
     user = os.getenv("EMAIL_USER")
     password = os.getenv("EMAIL_PASS")
-    if not user or not password or not to_email:
-        raise RuntimeError("Email credentials or recipient missing")
-    msg = MIMEMultipart()
-    msg["From"] = user
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(message, "plain"))
-    with smtplib.SMTP(host, port) as server:
-        server.starttls()
-        server.login(user, password)
-        server.send_message(msg)
+
+    if not to_email:
+        return "❌ No recipient address provided"
+    if not user or not password:
+        return "❌ Missing EMAIL_USER or EMAIL_PASS in environment"
+
+    # quick network connectivity test (dns + port)
+    try:
+        sock = socket.create_connection((host, port), timeout=10)
+        sock.close()
+    except Exception as e:
+        return f"❌ Network/connectivity error to {host}:{port} — {e}"
+
+    attempt = 0
+    last_exception = None
+    while attempt <= max_retries:
+        try:
+            msg = MIMEMultipart()
+            msg["From"] = user
+            msg["To"] = to_email
+            msg["Subject"] = subject
+            msg.attach(MIMEText(message, "plain"))
+
+            with smtplib.SMTP(host, port, timeout=30) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(user, password)
+                server.send_message(msg)
+
+            return "✅ Email sent successfully"
+        except smtplib.SMTPAuthenticationError as e:
+            return "❌ Authentication failed — check EMAIL_USER and Gmail App Password"
+        except smtplib.SMTPRecipientsRefused as e:
+            return f"❌ Recipient refused: {e}"
+        except smtplib.SMTPConnectError as e:
+            last_exception = e
+            attempt += 1
+            time.sleep(2 ** attempt)
+        except Exception as e:
+            last_exception = e
+            attempt += 1
+            time.sleep(2 ** attempt)
+
+    return f"❌ Failed to send email after {max_retries+1} attempts; last error: {last_exception}"
 
 def send_email(state):
     candidate_email = state.get("candidate_email", "")
     candidate_name = state.get("candidate_name", "Candidate")
     decision_data = state.get("decision_result", {})
+
     if isinstance(decision_data, str):
         try:
             decision_data = json.loads(decision_data)
         except Exception:
-            decision_data = {"decision": "Rejected", "feedback": "No feedback available", "score": 0}
+            decision_data = {"decision": "Rejected", "feedback": "Error parsing decision", "score": 0}
+
     decision = decision_data.get("decision", "Rejected")
     feedback = decision_data.get("feedback", "")
     score = decision_data.get("score", 0)
+
     subject = f"Application Update — Your Result: {decision}"
     if decision == "Accepted":
         message_body = f"""Dear {candidate_name},
@@ -123,8 +163,6 @@ After reviewing your resume and qualifications, we are pleased to inform you tha
 
 Your evaluation score: {score}/100
 Feedback: {feedback}
-
-Our recruitment team will reach out to you soon for the next steps.
 
 Regards,
 HR Team
@@ -138,19 +176,24 @@ After evaluation, we regret to inform you that your profile was not shortlisted 
 Your evaluation score: {score}/100
 Feedback: {feedback}
 
-We encourage you to apply again in the future.
-
 Regards,
 HR Team
 """
-    state["email_content"] = {"to": candidate_email, "subject": subject, "body": message_body.strip(), "send_status": "Not sent (simulation mode)"}
-    try:
-        if os.getenv("EMAIL_SEND", "false").lower() == "true":
-            send_real_email(candidate_email, subject, message_body)
-            state["email_content"]["send_status"] = "Email sent successfully"
-    except Exception as e:
-        state["email_content"]["send_status"] = f"Failed to send email: {e}"
+
+    send_status = "⚠️ Email sending disabled (simulation mode)"
+    if os.getenv("EMAIL_SEND", "false").lower() == "true":
+        send_status = send_real_email(candidate_email, subject, message_body)
+
+    state["email_content"] = {
+        "to": candidate_email,
+        "subject": subject,
+        "body": message_body.strip(),
+        "send_status": send_status,
+    }
+
+    print(f"[EMAIL DEBUG] → {send_status}")
     return state
+
 
 workflow = StateGraph(dict)
 workflow.add_node("summarize_resume", summarize_resume)
@@ -173,5 +216,6 @@ def run_resume_workflow(resume_text: str, job_data: dict, candidate_name: str = 
             except Exception:
                 pass
     return result
+
 
 
