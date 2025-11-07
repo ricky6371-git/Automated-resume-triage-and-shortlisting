@@ -5,15 +5,26 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from langgraph.graph import StateGraph
-from langchain_google_genai import ChatGoogleGenerativeAI
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 load_dotenv()
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
-model = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.3, api_key=os.getenv("GOOGLE_API_KEY"))
+def _call_gemini(prompt: str, model_name: str = "gemini-2.5-flash") -> str:
+    model = genai.GenerativeModel(model_name)
+    resp = model.generate_content(prompt)
+    text = getattr(resp, "text", None)
+    if not text and getattr(resp, "candidates", None):
+        try:
+            parts = resp.candidates[0].content.parts
+            text = "".join([getattr(p, "text", "") for p in parts])
+        except Exception:
+            text = str(resp)
+    return (text or "").strip()
 
 def summarize_resume(state):
-    resume_text = state.get("resume_text", "")
+    resume_text = state.get("resume_text", "") or ""
     prompt = f"""
 You are a professional technical recruiter.
 Summarize this resume into strict JSON with exactly these fields:
@@ -22,8 +33,7 @@ Output ONLY valid JSON. No markdown, no explanations.
 Resume:
 {resume_text}
 """
-    response = model.invoke(prompt)
-    text = getattr(response, "content", "").strip()
+    text = _call_gemini(prompt, model_name="gemini-2.5-flash")
     try:
         parsed = json.loads(text)
     except Exception:
@@ -34,22 +44,20 @@ Resume:
 
 def match_resume_to_job(state):
     resume_summary = state.get("resume_summary", {})
-    job_data = state.get("job_data", {})
+    job_data = state.get("job_data", {}) or {}
     title = job_data.get("title", "")
     desc = job_data.get("description", "")
     skills = job_data.get("must_have_skills", "")
     prompt = f"""
 You are an AI recruiter evaluating a candidate.
-Based on the following, rate the candidate (0-100) and explain briefly.
+Rate the candidate from 0 to 100 and provide a 2-line reasoning in JSON.
 Job Title: {title}
 Description: {desc}
 Must-have Skills: {skills}
 Candidate Summary: {json.dumps(resume_summary)}
-Respond in strict JSON:
-{{ "score": <integer>, "reasoning": "<2-line explanation>" }}
+Output only JSON: {{ "score": <integer>, "reasoning": "<2-line explanation>" }}
 """
-    response = model.invoke(prompt)
-    text = getattr(response, "content", "").strip()
+    text = _call_gemini(prompt, model_name="gemini-2.5-flash")
     try:
         parsed = json.loads(text)
     except Exception:
@@ -73,8 +81,7 @@ def decide_candidate(state):
         feedback = "Strong match — consider inviting the candidate for an interview."
     else:
         feedback = "Profile does not fully meet role requirements. Candidate may need more experience or key skills."
-    decision_output = {"decision": decision, "threshold": threshold, "score": score, "feedback": feedback, "reasoning": reasoning}
-    state["decision_result"] = decision_output
+    state["decision_result"] = {"decision": decision, "threshold": threshold, "score": score, "feedback": feedback, "reasoning": reasoning}
     return state
 
 def send_real_email(to_email, subject, message):
