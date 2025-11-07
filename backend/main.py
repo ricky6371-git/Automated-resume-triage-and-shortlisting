@@ -1,5 +1,4 @@
 from fastapi import FastAPI, File, UploadFile, Form
-from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
@@ -63,28 +62,9 @@ async def process_resume(
     except Exception as e:
         return {"error": f"Failed to process resume: {str(e)}"}
 
-
-@app.get("/_test_email")
-def test_email_endpoint():
-    """
-    Quick diagnostic endpoint: checks SMTP connectivity and, if EMAIL_SEND=true,
-    attempts to send a small test email to EMAIL_USER (or returns the status).
-    """
-    test_to = os.getenv("EMAIL_USER")
-    if not test_to:
-        return {"ok": False, "detail": "EMAIL_USER not set in environment"}
-
-    # small test message
-    subject = "Test email from Resume Triage backend"
-    body = "This is a test email sent from the backend to verify SMTP connectivity."
-
-    # call send_real_email directly (use same function from llm_agents)
-    from backend.llm_agents import send_real_email  # adjust import if different
-    status = send_real_email(test_to, subject, body)
-    return {"ok": True, "email_test_status": status}
-
 if __name__ == "__main__":
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
