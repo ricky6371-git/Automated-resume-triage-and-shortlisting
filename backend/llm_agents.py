@@ -89,53 +89,69 @@ def send_real_email(to_email, subject, message):
     port = int(os.getenv("EMAIL_PORT", "587"))
     user = os.getenv("EMAIL_USER")
     password = os.getenv("EMAIL_PASS")
-    if not user or not password or not to_email:
-        raise RuntimeError("Email credentials or recipient missing")
-    msg = MIMEMultipart()
-    msg["From"] = user
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(message, "plain"))
-    with smtplib.SMTP(host, port) as server:
-        server.starttls()
-        server.login(user, password)
-        server.send_message(msg)
+
+    if not all([to_email, user, password]):
+        raise RuntimeError("Missing email credentials or recipient")
+
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = user
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(message, "plain"))
+
+        with smtplib.SMTP(host, port, timeout=30) as server:
+            server.starttls()
+            server.login(user, password)
+            server.send_message(msg)
+
+        return "✅ Email sent successfully"
+    except smtplib.SMTPAuthenticationError:
+        return "❌ Authentication failed — check Gmail App Password"
+    except Exception as e:
+        return f"❌ Failed to send email: {str(e)}"
+
 
 def send_email(state):
     candidate_email = state.get("candidate_email", "")
     candidate_name = state.get("candidate_name", "Candidate")
     decision_data = state.get("decision_result", {})
+
     if isinstance(decision_data, str):
         try:
             decision_data = json.loads(decision_data)
         except Exception:
-            decision_data = {"decision": "Rejected", "feedback": "No feedback available", "score": 0}
+            decision_data = {"decision": "Rejected", "feedback": "Error parsing decision", "score": 0}
+
     decision = decision_data.get("decision", "Rejected")
     feedback = decision_data.get("feedback", "")
     score = decision_data.get("score", 0)
+
     subject = f"Application Update — Your Result: {decision}"
+
     if decision == "Accepted":
-        message_body = f"""Dear {candidate_name},
+        message_body = f"""
+Dear {candidate_name},
 
-Congratulations!
+Congratulations! 🎉
+Your profile has been shortlisted successfully.
 
-After reviewing your resume and qualifications, we are pleased to inform you that your application has been shortlisted.
-
-Your evaluation score: {score}/100
+Score: {score}/100
 Feedback: {feedback}
 
-Our recruitment team will reach out to you soon for the next steps.
+Our HR team will contact you soon.
 
 Regards,
 HR Team
 """
     else:
-        message_body = f"""Dear {candidate_name},
+        message_body = f"""
+Dear {candidate_name},
 
-Thank you for applying for this position.
-After evaluation, we regret to inform you that your profile was not shortlisted at this time.
+Thank you for applying.
+Unfortunately, your profile was not shortlisted this time.
 
-Your evaluation score: {score}/100
+Score: {score}/100
 Feedback: {feedback}
 
 We encourage you to apply again in the future.
@@ -143,14 +159,22 @@ We encourage you to apply again in the future.
 Regards,
 HR Team
 """
-    state["email_content"] = {"to": candidate_email, "subject": subject, "body": message_body.strip(), "send_status": "Not sent (simulation mode)"}
-    try:
-        if os.getenv("EMAIL_SEND", "false").lower() == "true":
-            send_real_email(candidate_email, subject, message_body)
-            state["email_content"]["send_status"] = "Email sent successfully"
-    except Exception as e:
-        state["email_content"]["send_status"] = f"Failed to send email: {e}"
+
+    send_status = "⚠️ Email sending disabled"
+    if os.getenv("EMAIL_SEND", "false").lower() == "true":
+        send_status = send_real_email(candidate_email, subject, message_body)
+
+    state["email_content"] = {
+        "to": candidate_email,
+        "subject": subject,
+        "body": message_body.strip(),
+        "send_status": send_status,
+    }
+
+    print(f"[EMAIL DEBUG] → {send_status}")  # visible in Render logs
+
     return state
+
 
 workflow = StateGraph(dict)
 workflow.add_node("summarize_resume", summarize_resume)
@@ -173,3 +197,4 @@ def run_resume_workflow(resume_text: str, job_data: dict, candidate_name: str = 
             except Exception:
                 pass
     return result
+
