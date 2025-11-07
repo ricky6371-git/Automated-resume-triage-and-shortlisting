@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import json
 
-fastapi_url = "http://localhost:8000/process_resume"
+fastapi_url = "https://automated-resume-triage-and-shortlisting.onrender.com/"
 
 st.set_page_config(page_title="Automated Resume Triage", layout="wide")
 st.title("Automated Resume Triage and Shortlisting")
@@ -66,4 +66,5 @@ else:
                         else:
                             st.error(f"Backend returned status code {response.status_code}")
                     except Exception as e:
+
                         st.error(f"Request failed: {e}")
